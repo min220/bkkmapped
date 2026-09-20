@@ -1,0 +1,1366 @@
+<meta charset="utf-8">
+<title>Bangkok, Unmarked</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  :root{
+    --paper:#FAF5E9;
+    --paper-deep:#F6EDDB;
+    --ink:#2B2018;
+    --ink-soft:#5B4C3B;
+    --card:#FDF8EC;
+    --rose:#E3ACA6; --rose-deep:#D08D87;
+    --sage:#A9C98F; --sage-deep:#8FB771;
+    --lilac:#C1B4DE; --lilac-deep:#A793CB;
+    --seafoam:#9AD0C6; --seafoam-deep:#78BAAD;
+    --accent:#2E6B60;
+    --road-major:#CB7F45;
+    --road-primary:#E3B368;
+    --rail:#4C9686;
+    --river:#5D93B8;
+    --font-display:'Fraunces',Georgia,'Times New Roman',serif;
+    --font-body:'Work Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',monospace;
+  }
+  html,body{height:100%;margin:0;overscroll-behavior:none;}
+  body{background:var(--paper);color:var(--ink);font-family:var(--font-body);}
+  #app{position:relative;width:100%;height:100%;min-height:100%;overflow:hidden;}
+  #scene{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab;}
+  #scene.dragging{cursor:grabbing;}
+  #scene.hoverable{cursor:pointer;}
+
+  #labels{position:absolute;inset:0;pointer-events:none;z-index:2;}
+  .lbl{position:absolute;left:0;top:0;white-space:nowrap;will-change:transform;}
+  .lbl-district{
+    font-family:var(--font-display);font-weight:600;color:var(--ink);
+    font-size:clamp(13px,1.6vw,19px);letter-spacing:.2px;
+    text-shadow:0 1px 0 rgba(251,243,222,.7), 0 0 10px rgba(239,219,175,.95);
+    transition:color .15s ease;
+  }
+  .lbl-district.active{color:var(--accent);}
+  .lbl-landmark{font-family:var(--font-body);font-weight:600;font-size:11px;color:var(--ink-soft);text-shadow:0 0 6px rgba(239,219,175,.9);}
+  .lbl-landmark .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ink);margin-right:5px;vertical-align:middle;}
+  .lbl-street{font-family:var(--font-body);font-style:italic;font-weight:500;font-size:10.5px;color:var(--ink-soft);text-shadow:0 0 6px rgba(239,219,175,.9);}
+  .lbl-river{font-family:var(--font-display);font-style:italic;font-weight:600;font-size:12.5px;color:var(--river);text-shadow:0 0 6px rgba(239,219,175,.95);}
+  .lbl-callout{font-family:var(--font-body);font-style:italic;font-weight:500;font-size:10.5px;color:var(--ink-soft);text-align:center;line-height:1.35;text-shadow:0 0 6px rgba(239,219,175,.9);}
+  .lbl-road{font-family:var(--font-body);font-weight:600;font-size:9.5px;letter-spacing:.2px;color:var(--ink-soft);text-shadow:0 0 5px rgba(239,219,175,.95);}
+  .lbl-road.major{color:#9c5f2e;font-weight:700;}
+
+  /* --- story-site markers/labels ---
+     No bullet/ring in the label itself -- the 3D ring+dot mesh already
+     marks the spot. An earlier version duplicated it with a small CSS
+     circle here, which (even once correctly anchored) sat immediately
+     next to the real marker and read as two overlapping circles instead
+     of one clean pin. The label is just text now, trailing the marker by
+     a fixed screen-space gap (see the 'left' anchor handling in animate()).
+
+     Names stay hidden by default and fade in only on hover/select
+     (the same .active class syncLabelActive() already toggles). With
+     just a handful of sites the always-on names were fine, but as more
+     get added, permanent labels for every one would clutter the map --
+     the colored dots plus district names are enough at a glance, and a
+     name surfaces the moment you're actually looking at that site. */
+  .lbl-site{
+    font-family:var(--font-display);font-weight:600;font-style:italic;
+    font-size:12.5px;color:var(--ink);
+    text-shadow:0 1px 0 rgba(251,243,222,.8), 0 0 10px rgba(239,219,175,.95);
+    opacity:0;
+    transition:color .15s ease, transform .15s ease, opacity .15s ease;
+    cursor:pointer;
+  }
+  .lbl-site.active{ opacity:1; color:var(--site-c,var(--accent)); transform:scale(1.06); }
+
+  /* --- title / scale card --- */
+  #card{
+    position:absolute;left:16px;bottom:16px;z-index:3;
+    background:var(--card);border:1.5px solid var(--ink);border-radius:10px;
+    padding:14px 18px 12px;box-shadow:0 6px 18px rgba(43,32,24,.18);
+    max-width:calc(100vw - 32px);
+  }
+  #card h1{margin:0;font-family:var(--font-display);font-weight:700;font-size:clamp(24px,4.6vw,34px);letter-spacing:.5px;}
+  #card p.sub{margin:1px 0 10px;font-size:11.5px;color:var(--ink-soft);letter-spacing:.4px;text-transform:uppercase;}
+  .scale{display:flex;align-items:flex-end;gap:0;margin-bottom:10px;}
+  .scale-bar{display:flex;height:7px;border:1px solid var(--ink);border-radius:2px;overflow:hidden;width:130px;}
+  .scale-bar span{flex:1;}
+  .scale-bar span:nth-child(odd){background:var(--ink);}
+  .scale-bar span:nth-child(even){background:var(--card);}
+  .scale-labels{display:flex;justify-content:space-between;width:130px;font-family:var(--font-mono);font-size:10px;color:var(--ink-soft);margin-top:3px;}
+  .scale-labels .end{text-align:right;line-height:1.25;}
+  .legend{display:flex;flex-wrap:wrap;gap:8px 12px;max-width:230px;}
+  .legend-item{display:flex;align-items:center;gap:5px;font-size:9.5px;letter-spacing:.2px;color:var(--ink-soft);text-transform:uppercase;}
+  .legend-sw{display:inline-block;width:14px;height:3px;border-radius:2px;flex:none;}
+  .sw-major{background:var(--road-major);}
+  .sw-primary{background:var(--road-primary);}
+  .sw-rail{background:var(--rail);height:3px;}
+  .sw-river{background:var(--river);}
+  .sw-site{width:10px;height:10px;border-radius:50%;background:#fff;border:2px solid var(--ink);}
+
+  .about-link{
+    display:inline-block;margin-top:10px;padding:0;border:none;background:none;
+    font-family:var(--font-body);font-weight:600;font-size:11px;letter-spacing:.3px;
+    color:var(--ink-soft);text-decoration:underline;text-underline-offset:2px;cursor:pointer;
+  }
+  .about-link:hover{color:var(--ink);}
+  .about-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+  /* --- compass --- */
+  #compass{
+    position:absolute;top:16px;right:16px;z-index:3;
+    width:46px;height:46px;border-radius:50%;
+    background:var(--card);border:1.5px solid var(--ink);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 4px 12px rgba(43,32,24,.18);
+  }
+  #compass svg{width:22px;height:22px;transform-origin:50% 50%;}
+  #compass span{position:absolute;bottom:2px;left:50%;transform:translateX(-50%);font-family:var(--font-mono);font-size:8px;font-weight:600;color:var(--ink-soft);}
+
+  /* --- hint pill --- */
+  #hint{
+    position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:3;
+    background:var(--ink);color:var(--card);font-size:12px;font-family:var(--font-body);
+    padding:7px 14px;border-radius:999px;white-space:nowrap;
+    box-shadow:0 4px 12px rgba(43,32,24,.25);
+    transition:opacity .5s ease, transform .5s ease;
+  }
+  #hint.hidden{opacity:0;transform:translateX(-50%) translateY(8px);pointer-events:none;}
+  @media (max-width:640px){ #hint{ left:16px; right:16px; transform:none; text-align:center; bottom:auto; top:16px; } #hint.hidden{transform:translateY(-8px);} }
+
+  /* --- reset / wander buttons --- */
+  #resetBtn, #wanderBtn{
+    position:absolute;right:16px;z-index:3;
+    font-family:var(--font-body);font-weight:600;font-size:11.5px;letter-spacing:.3px;
+    background:var(--card);color:var(--ink);border:1.5px solid var(--ink);border-radius:8px;
+    padding:8px 10px;cursor:pointer;box-shadow:0 4px 12px rgba(43,32,24,.18);
+  }
+  #resetBtn{top:74px;}
+  #wanderBtn{top:120px;}
+  #resetBtn:hover, #wanderBtn:hover{background:var(--ink);color:var(--card);}
+  #resetBtn:focus-visible, #wanderBtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+  /* --- loading --- */
+  #loading{
+    position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;
+    background:var(--paper);font-family:var(--font-display);font-style:italic;font-size:15px;color:var(--ink-soft);
+    transition:opacity .4s ease;
+  }
+  #loading.hidden{opacity:0;pointer-events:none;}
+
+  /* --- info panel --- */
+  #panel{
+    position:absolute;top:0;right:0;height:100%;width:min(380px,88vw);z-index:4;
+    background:var(--card);border-left:1.5px solid var(--ink);
+    box-shadow:-10px 0 24px rgba(43,32,24,.2);
+    transform:translateX(100%);transition:transform .35s cubic-bezier(.3,.8,.3,1);
+    display:flex;flex-direction:column;padding:20px 22px;box-sizing:border-box;
+    overflow-y:auto;
+  }
+  #panel.open{transform:translateX(0);}
+  #panel .tag-row{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;}
+  #panel .tag{
+    font-family:var(--font-mono);font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;
+    color:var(--accent);border:1.5px solid var(--accent);border-radius:5px;padding:3px 8px;margin:0;
+  }
+  #panel .tag.place{color:var(--ink-soft);border-color:var(--ink-soft);}
+  #panel h2{font-family:var(--font-display);font-weight:700;font-size:28px;margin:0 0 8px;text-wrap:balance;line-height:1.12;}
+  #panel p.hook{font-family:var(--font-display);font-style:italic;font-weight:500;color:var(--accent);font-size:15px;margin:0 0 14px;line-height:1.4;}
+  #panel .story p{font-size:14px;line-height:1.68;color:var(--ink-soft);margin:0 0 12px;}
+  #panel .story p:last-child{margin-bottom:0;}
+  #panel p.desc{font-size:14.5px;line-height:1.6;color:var(--ink-soft);margin:0;}
+  #panel .swatch{width:34px;height:10px;border-radius:3px;border:1px solid var(--ink);margin-bottom:14px;}
+  #panel .coords{
+    margin-top:16px;padding-top:12px;border-top:1.5px solid rgba(43,32,24,.16);
+    font-family:var(--font-mono);font-size:10.5px;color:var(--ink-soft);
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;
+  }
+  #closePanel{
+    align-self:flex-end;background:none;border:none;font-family:var(--font-body);
+    font-size:13px;font-weight:600;color:var(--ink-soft);cursor:pointer;padding:4px 6px;margin-bottom:6px;
+  }
+  #closePanel:hover{color:var(--ink);}
+  #closePanel:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  @media (max-width:640px){
+    #panel{top:auto;bottom:0;left:0;right:0;width:100%;height:auto;max-height:66vh;
+      border-left:none;border-top:1.5px solid var(--ink);border-radius:14px 14px 0 0;
+      transform:translateY(100%);overflow-y:auto;}
+    #panel.open{transform:translateY(0);}
+  }
+
+  /* --- about modal ---
+     A separate small centered dialog, not the sliding story panel --
+     this is a one-time "why this exists" note, not a piece of map
+     content, so it shouldn't look like just another site entry. */
+  #aboutModal{
+    position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;
+    padding:24px;box-sizing:border-box;
+    background:rgba(43,32,24,.45);
+    opacity:0;pointer-events:none;transition:opacity .25s ease;
+  }
+  #aboutModal.open{opacity:1;pointer-events:auto;}
+  #aboutModal .box{
+    position:relative;background:var(--card);border:1.5px solid var(--ink);border-radius:12px;
+    max-width:460px;width:100%;padding:24px 26px 22px;
+    box-shadow:0 16px 40px rgba(43,32,24,.3);
+  }
+  #aboutModal h2{font-family:var(--font-display);font-weight:700;font-size:22px;margin:0 0 12px;}
+  #aboutModal p{font-size:14.5px;line-height:1.68;color:var(--ink-soft);margin:0 0 12px;}
+  #aboutModal p:last-child{margin-bottom:0;}
+  #aboutClose{
+    position:absolute;top:14px;right:16px;background:none;border:none;
+    font-family:var(--font-body);font-size:13px;font-weight:600;color:var(--ink-soft);cursor:pointer;padding:4px 6px;
+  }
+  #aboutClose:hover{color:var(--ink);}
+  #aboutClose:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+  @media (prefers-reduced-motion: reduce){
+    #panel{transition:none;} #hint{transition:none;} #loading{transition:none;} #aboutModal{transition:none;}
+  }
+</style>
+
+<div id="app">
+  <canvas id="scene" aria-label="Interactive street map of Bangkok"></canvas>
+  <div id="labels"></div>
+  <div id="loading">Tracing the streets of Bangkok&hellip;</div>
+
+  <div id="card">
+    <h1>Bangkok</h1>
+    <p class="sub" id="cardSub">Unmarked &mdash; seven hidden histories</p>
+    <div class="scale">
+      <div>
+        <div class="scale-bar"><span></span><span></span><span></span><span></span></div>
+        <div class="scale-labels"><span>0</span><span class="end">3&nbsp;mi<br>5&nbsp;km</span></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><i class="legend-sw sw-site"></i>Marked story</span>
+      <span class="legend-item"><i class="legend-sw sw-major"></i>Expressway</span>
+      <span class="legend-item"><i class="legend-sw sw-primary"></i>Major road</span>
+      <span class="legend-item"><i class="legend-sw sw-rail"></i>BTS&nbsp;/&nbsp;MRT</span>
+      <span class="legend-item"><i class="legend-sw sw-river"></i>River&nbsp;&amp;&nbsp;canals</span>
+    </div>
+    <button class="about-link" id="aboutBtn" type="button">About this map</button>
+  </div>
+
+  <div id="compass" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><path d="M12 1 L15 11 L12 9 L9 11 Z" fill="#2B2018"/><path d="M12 23 L15 13 L12 15 L9 13 Z" fill="#8a7a63"/></svg>
+    <span>N</span>
+  </div>
+
+  <button id="resetBtn" type="button">Reset view</button>
+  <button id="wanderBtn" type="button">&#10731; Wander</button>
+  <div id="hint">Drag to tilt &middot; Scroll to zoom &middot; Click a marked story</div>
+
+  <div id="panel" role="dialog" aria-label="Story details">
+    <button id="closePanel" type="button">Close &times;</button>
+    <div class="swatch" id="panelSwatch"></div>
+    <div class="tag-row" id="panelTagRow">
+      <p class="tag" id="panelTag"></p>
+      <p class="tag place" id="panelPlace"></p>
+    </div>
+    <h2 id="panelTitle"></h2>
+    <p class="hook" id="panelHook"></p>
+    <div class="story" id="panelStory"></div>
+    <p class="desc" id="panelDesc" hidden></p>
+    <div class="coords" id="panelCoords" hidden>
+      <span id="panelCoordsText"></span>
+      <span id="panelIndexText"></span>
+    </div>
+  </div>
+
+  <div id="aboutModal" role="dialog" aria-label="About this map" aria-hidden="true">
+    <div class="box">
+      <button id="aboutClose" type="button">Close &times;</button>
+      <h2>About this map</h2>
+      <p>I made Bangkok, Unmarked after coming across Dern.Collective on Instagram, a page that reminded me how much history is packed into every corner of the city I grew up in.</p>
+      <p>When I moved to the US for college, people would tell me they wanted to visit Bangkok, and I would tell them it's amazing, without fully grasping how true that was myself. It wasn't until recently that I understood how much depth this city holds, in the street where I meet a friend for lunch, in the alley I pass on my way to shop.</p>
+      <p>This project is my way of documenting that: a love letter to the city I never want to neglect, and to the stories I never want to be forgotten.</p>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+/* ---------------------------------------------------------------
+   Districts — 8 informal tourist-area labels, positioned at their
+   real coordinates (projected below), colored as a translucent
+   wash rather than solid shapes so the real street grid under
+   them stays legible.
+--------------------------------------------------------------- */
+const REGIONS = [
+  { key:'ari', name:'Ari', color:0xA9C98F, hoverColor:0x8FB771,
+    tag:'Coffee & quiet sois', label:[131,-316],
+    desc:'Leafy side streets of specialty coffee shops, indie boutiques and late-night bars — a favourite with young Bangkokians.',
+    pts:[[225,-316],[205,-262],[153,-248],[105,-235],[47,-255],[46,-316],[71,-360],[103,-403],[159,-402],[197,-364]] },
+
+  { key:'banglamphu', name:'Banglamphu', color:0xE3ACA6, hoverColor:0xD08D87,
+    tag:'Old city & Khao San', label:[-280,-127],
+    desc:'The old city on the riverbank around Khao San Road — temple spires, riverside markets and the Grand Palace complex close by.',
+    pts:[[-183,-127],[-211,-83],[-258,-66],[-304,-63],[-346,-85],[-366,-127],[-354,-175],[-305,-194],[-260,-182],[-214,-169]] },
+
+  { key:'chinatown', name:'Chinatown', color:0xC1B4DE, hoverColor:0xA793CB,
+    tag:'Yaowarat at night', label:[-198,45],
+    desc:'Neon signage over gold shops and street-food stalls right along the riverbank, running long past midnight.',
+    pts:[[-114,45],[-147,77],[-178,97],[-223,111],[-258,83],[-266,45],[-260,6],[-220,-13],[-179,-5],[-135,5]] },
+
+  { key:'thonburi', name:'Thonburi', color:0x9AD0C6, hoverColor:0x78BAAD,
+    tag:'Across the river', label:[-478,70],
+    desc:'The west bank of the Chao Phraya, facing the old city across the water — canal life, fruit markets and river-view temples like Wat Arun.',
+    pts:[[-350,70],[-375,135],[-420,168],[-475,178],[-528,155],[-560,95],[-562,30],[-535,-25],[-480,-45],[-415,-10]] },
+
+  { key:'siam', name:'Siam', color:0xE3ACA6, hoverColor:0xD08D87,
+    tag:"Bangkok's retail core", label:[42,-15],
+    desc:"Bangkok's retail core, inland from the old city — mega-malls, the BTS interchange, and the buzz of Siam Square after dark.",
+    pts:[[140,-15],[107,26],[63,42],[15,57],[-30,31],[-35,-15],[-27,-59],[15,-87],[64,-73],[107,-57]] },
+
+  { key:'silom', name:'Silom', color:0xA9C98F, hoverColor:0x8FB771,
+    tag:'Towers & Lumphini Park', label:[39,187],
+    desc:"Business towers by day, Patpong's night market after dark, and Lumphini Park's morning joggers.",
+    pts:[[131,187],[97,216],[61,235],[12,244],[-32,223],[-47,187],[-28,153],[17,140],[62,137],[116,148]] },
+
+  { key:'sukhumvit', name:'Sukhumvit', color:0x9AD0C6, hoverColor:0x78BAAD,
+    tag:'The long BTS corridor', label:[252,68],
+    desc:'A sprawling corridor east of Siam — rooftop bars, malls and soi food stalls strung along the BTS line.',
+    pts:[[347,68],[323,130],[276,157],[221,180],[167,140],[174,68],[186,12],[220,-47],[280,-37],[320,9]] },
+
+  { key:'thonglor', name:'Thong Lor & Ekamai', color:0xC1B4DE, hoverColor:0xA793CB,
+    tag:"Bangkok's design set", label:[465,192],
+    desc:"Bangkok's design-forward set, further out along Sukhumvit — specialty cafés, concept stores and late bars.",
+    pts:[[580,192],[541,247],[491,271],[436,282],[383,251],[361,192],[381,131],[438,108],[490,115],[549,131]] },
+];
+
+const LANDMARKS = [
+  { name:'Grand Palace &amp; Wat Phra Kaew', pos:[-343,-46] },
+  { name:'Victory Monument', pos:[67,-180] },
+  { name:'Lumphini Park', pos:[105,130] },
+];
+const STREETS = [
+  { name:'Khao San Road', pos:[-322,-160] },
+];
+const CALLOUTS = [
+  { html:'to Chatuchak Market<br>&amp; Don Mueang Airport &uarr;', pos:[131,-435] },
+  { html:'to Suvarnabhumi<br>Airport &searr;', pos:[592,305] },
+];
+
+/* ---------------------------------------------------------------
+   The seven marked stories — real coordinates, projected into the
+   same world-unit space as the street/region data below using an
+   affine fit solved from three known landmarks (Democracy Monument
+   Circle, Victory Monument Circle, Memorial Bridge, Grand Palace,
+   Lumphini Park) via least-squares — residuals under ~2 world units
+   at every calibration point, tighter than the original 3-point fit.
+--------------------------------------------------------------- */
+const PROJ = {
+  x: [8828.76366, -43.7670972, -886953.863],
+  z: [-0.896439889, -9155.92358, 125938.146]
+};
+function projectLatLon(lat, lon){
+  return [
+    PROJ.x[0]*lon + PROJ.x[1]*lat + PROJ.x[2],
+    PROJ.z[0]*lon + PROJ.z[1]*lat + PROJ.z[2]
+  ];
+}
+
+const SITES = [
+  {
+    id: "cia-safehouse",
+    name: "The Safe House Above Patpong",
+    neighborhood: "Silom · Patpong",
+    lat: 13.73058, lon: 100.52388,
+    era: "1960s–70s", eraSort: 6, color: "#3d5a80",
+    hook: "Above a go-go bar, a Cold War listening post.",
+    story: [
+      "Above the Madrid Bar on a Patpong soi sits a nondescript, well-worn building. Locals and historians have long believed it was a CIA safe house through the 1960s and '70s — a quiet Southeast Asian outpost during the Vietnam War era, tucked directly above one of the city's most notorious nightlife strips.",
+      "Tony Poe, the CIA paramilitary officer who trained secret armies in Laos, is said to have run some of his darkest operations out of rooms above the bars below — espionage hiding in the last place anyone would look for it."
+    ]
+  },
+  {
+    id: "wat-chakrawat",
+    name: "The Crocodile of Wat Chakrawat",
+    neighborhood: "Chinatown · Yaowarat",
+    lat: 13.7430468, lon: 100.5035751,
+    era: "WWII · 1942", eraSort: 5, color: "#3f7d5c",
+    hook: "A man-eating crocodile, cornered by monks who wouldn't kill it.",
+    story: [
+      "During the great Bangkok flood of 1942 — the same year Japanese forces occupied the city — a crocodile crawled out of the swollen river and began attacking residents. Locals called it Ai Bod, “the blind one.” For months it vanished and resurfaced, slipping past every attempt to catch it.",
+      "It was finally cornered in the canals near this temple and took shelter beneath the monks' quarters. Rather than kill it, the monks dug it an enclosure on the grounds. Ai Bod is long dead, but the taxidermied crocodile on display today is believed to be him — and the temple still keeps live crocodiles in that same enclosure."
+    ]
+  },
+  {
+    id: "wat-suthat",
+    name: "The Buddha Cast From Opium",
+    neighborhood: "Rattanakosin · Sao Chingcha",
+    lat: 13.751715660095215, lon: 100.50079345703125,
+    era: "Rama III · 1839", eraSort: 1, color: "#b8801f",
+    hook: "A Buddha cast from a king's confiscated opium.",
+    story: [
+      "In the early 1800s, King Rama III waged a brutal campaign against Siam's illegal opium trade — executing major traffickers and burning more than 200,000 kilograms of confiscated opium. In 1839 he ordered a different kind of disposal: the tin and lead boxes seized in the crackdown were melted down and cast into a Buddha image.",
+      "The result, Phra Buddha Sethamuni — known locally as Luang Pho Klak Fin, roughly “the Buddha who quit smoking,” — sits in the Mara-Vijaya posture of triumph over evil. A symbol of the city's poison, recast as an object of devotion, still inside Wat Suthat today."
+    ]
+  },
+  {
+    id: "rommaninat-park",
+    name: "The Park That Was a Prison",
+    neighborhood: "Rattanakosin · Sao Chingcha",
+    lat: 13.75398, lon: 100.50144,
+    era: "Rama V–IX · 1890–1992", eraSort: 3, color: "#6b7a3f",
+    hook: "A public park built where a maximum-security prison once stood.",
+    story: [
+      "This shaded park in Phra Nakhon sits on the former grounds of Klong Prem Prison, built in 1890 under King Chulalongkorn (Rama V) and modeled directly on London's Brixton Prison. In 1960, overcrowding pushed the central prison out to the city's outskirts, and the site carried on as the Bangkok Remand Centre instead.",
+      "By the 1990s it had outlived its purpose. Most of the buildings were demolished, and in 1992 the grounds reopened as Rommaninat Park, marking Queen Sirikit's 60th birthday. What's now benches and shade trees was, within living memory, a cell block."
+    ]
+  },
+  {
+    id: "wat-bowonniwet",
+    name: "The Enemy at the Gate",
+    neighborhood: "Bang Lamphu",
+    lat: 13.7571972, lon: 100.5044649,
+    era: "Rama IV · 1848", eraSort: 2, color: "#b23c28",
+    hook: "A Buddha installed to guard against a rival's dying curse.",
+    story: [
+      "Mom Kraison, son of Rama I, spent decades tormenting the reformist Thammayut monks founded by the future Rama IV — who called him his lifelong enemy. In 1848 Kraison was arrested for plotting rebellion, stripped of his titles, and became the last person in Thai history executed by sandalwood club. Offered forgiveness at the end, he refused — vowing to carry the grudge into his next life.",
+      "To shield the temple from his lingering bad karma, Rama IV installed the Phra Phairi Phinat Buddha, “Vanquisher of All Enemies,” which still stands here. The temple's ornate Siew Kgang gate on Phra Sumen Road is guarded by four gilded door guardians in Thai-Chinese armor, their mouths stained black — rumored to be opium residue tied to an addict who died on the spot and still haunts locals' dreams. It's almost certainly just coffee, which residents leave at the gate every day. Once opened only for royalty and holy days, it now stays open to anyone, 6 a.m. to 5 p.m."
+    ]
+  },
+  {
+    id: "optimus-prime",
+    name: "The Robot Shrine of Talad Noi",
+    neighborhood: "Talad Noi",
+    lat: 13.738, lon: 100.512,
+    era: "2025", eraSort: 7, color: "#c04568",
+    hook: "A scrap-metal shrine nobody planned to build.",
+    story: [
+      "Welded from recycled auto parts for Bangkok Design Week 2025, this scrap-metal Optimus Prime sits fittingly in Talad Noi — the city's second-hand car-parts hub for decades. It went spiritual almost immediately: after a nearby shop owner prayed to it and business picked up, they brought in traditional Thai dancers and started leaving offerings of strawberry Fanta and engine oil.",
+      "Word spread, crowds followed, and the roundabout briefly turned into an informal shrine for wealth and luck. Locals online were quick to point out it's less genuine worship than Bangkok doing what Bangkok does — folding the absurd into the sacred without drawing much of a line. City officials eventually asked people to stop leaving offerings; the crowds were blocking traffic. A brand-new statue, already haunted."
+    ]
+  },
+  {
+    id: "pei-ing",
+    name: "Billionaires, One Wall From Playboy Alley",
+    neighborhood: "Songwat · Chinatown",
+    lat: 13.7388961, lon: 100.5060421,
+    era: "1920s–today", eraSort: 4, color: "#2f7288",
+    hook: "Billionaires and a red-light alley, one wall apart.",
+    story: [
+      "Songwat Road was once Bangkok's busiest merchant backstreet, built up around Chao Phraya river trade; today it's one of the city's hippest strips, though the old bones are still there. Pei Ing, founded in 1920 by Teochew merchants, is one of Thailand's oldest Chinese-language schools — it survived wars and political upheaval and quietly produced at least four Thai-Chinese billionaires, including the founders of ThaiBev and Sahapat. Inside, the Lao Pun Thao Kong shrine houses a 200-year-old statue of the god of prosperity, still receiving offerings today.",
+      "Right next door is Trok Chaiyaphum — known in Chinese as Huang Liu Gai, known to everyone else as Playboy Alley. For much of the mid-20th century it was a red-light district. Now it's just a quiet lane beside a school that made billionaires. Sinners and saints, same block."
+    ]
+  },
+  {
+    id: "charoen-krung-cambodian-princes",
+    name: "The Cambodian Princes of Charoen Krung",
+    neighborhood: "Wang Burapha · Charoen Krung Soi 9",
+    lat: 13.7455, lon: 100.5015,
+    era: "Rama I–IV · 1780s–1850s", eraSort: 0, color: "#7c5a9e",
+    hook: "Two Cambodian kings, raised as wards of the Siamese court.",
+    story: [
+      "Cambodia fell into civil war in 1779 after King Ang Non II was killed, splitting the royal court between a pro-Vietnamese regent and pro-Siamese officials. The regent placed a six-year-old boy, Ang Eng, on the throne as a puppet, then was overthrown in a coup by the pro-Siamese official Baen. Ang Eng was brought here to Bangkok for safety and raised at the Siamese court by Rama I, before being sent back to Cambodia years later to rule as king.",
+      "By Rama III's reign, in the 1820s through 1850s, Siam and Vietnam were locked in a decades-long tug of war over who would sit on Cambodia's throne, and Bangkok's exiled Cambodian royals had become the key pieces on that board. Ang Duong, raised in the city with deep Siamese ties, was crowned king of Cambodia right here in Bangkok, with Siam's backing. He later sent his own sons back to this same city to be raised the same way, the cycle repeating itself once more."
+    ]
+  }
+];
+SITES.sort((a,b)=>a.eraSort-b.eraSort);
+SITES.forEach(s=>{ const [x,z] = projectLatLon(s.lat, s.lon); s.world = [x,z]; });
+
+// Keep the card's site count in words in sync with SITES.length automatically --
+// more stories are still being added, and a stale "seven hidden histories"
+// after an eighth (or ninth, or twentieth) gets added is an easy thing to
+// forget by hand. Spelled out through twenty, which comfortably covers the
+// ~15-20 entries planned; falls back to the numeral beyond that.
+const COUNT_WORDS = ['zero','one','two','three','four','five','six','seven','eight','nine','ten',
+  'eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty'];
+const countWord = COUNT_WORDS[SITES.length] || String(SITES.length);
+document.getElementById('cardSub').textContent = `Unmarked — ${countWord} hidden ${SITES.length===1?'history':'histories'}`;
+
+const MAP_CENTER = { x:-8, z:-9 };
+const BOARD_Y = -9;
+const DATA_URL = './bangkok-mapdata.json';
+
+/* ---------------------------------------------------------------
+   Scene setup
+--------------------------------------------------------------- */
+const canvas = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0xFAF5E9, 1);
+
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1,1,1,-1,1,3000);
+
+scene.add(new THREE.AmbientLight(0xfff4df, 1.1));
+const keyLight = new THREE.DirectionalLight(0xfff1d9, 0.4);
+keyLight.position.set(250,520,650);
+scene.add(keyLight);
+
+// board plate beneath everything — oversized so no edge is ever visible.
+// Unlit on purpose: an earlier version used a lit MeshStandardMaterial here,
+// which under the scene's ambient+directional lights rendered noticeably
+// darker/greyer ("taupe") than the flat, unlit paper color the vignette
+// above fades into -- invisible most of the time since roads/districts
+// cover the plate almost everywhere, but glaringly obvious as a hard-edged
+// rectangle the moment a far zoom-out + pan revealed bare plate past the
+// vignette's own (necessarily finite) extent. Matching both the color AND
+// the lighting model to the vignette's solid color removes that seam
+// completely, at any zoom or pan distance.
+{
+  const geo = new THREE.PlaneGeometry(7000, 7000, 1, 1);
+  const mat = new THREE.MeshBasicMaterial({ color:0xFAF5E9 });
+  const plate = new THREE.Mesh(geo, mat);
+  plate.rotation.x = -Math.PI/2;
+  plate.position.set(MAP_CENTER.x, BOARD_Y, MAP_CENTER.z);
+  scene.add(plate);
+}
+
+// Fade-to-blank vignette, sitting ABOVE every road/district/rail mesh
+// (unlike the board plate below everything, which only smooths the color
+// of the empty area itself). The loaded street data has a real, finite
+// edge -- past roughly x:[-717,670] z:[-555,526] -- and it used to just
+// stop, so panning or zooming out revealed a hard boundary between dense
+// road texture and flat nothing. This plane paints the exact same paper
+// color back over the content as it nears that edge, so the terrain
+// itself visibly dissolves into the empty board rather than cutting off.
+// A plain radial gradient (not a post-process pass) is enough since the
+// vignette's opaque color already matches the board/paper exactly.
+{
+  function makeVignetteTexture(){
+    const size = 512;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createRadialGradient(size/2, size/2, size*0.30, size/2, size/2, size*0.5);
+    grad.addColorStop(0, 'rgba(250,245,233,0)');
+    grad.addColorStop(0.7, 'rgba(250,245,233,0.55)');
+    grad.addColorStop(1, 'rgba(250,245,233,1)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    const tex = new THREE.CanvasTexture(c);
+    // Canvas 2D pixel values are sRGB-encoded by definition; without this,
+    // three.js's color-managed pipeline treated the texture's raw numbers as
+    // already-linear, so the gradient's "opaque, matches --paper" outer band
+    // didn't actually land on the same rendered color as the flat, sRGB-aware
+    // MeshBasicMaterial `color:` used on the board plate a few pixels away --
+    // a few-RGB-unit brightening right where the two met, visible as a faint
+    // remaining seam even after both used the identical 0xFAF5E9 hex.
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
+  }
+  const vGeo = new THREE.PlaneGeometry(2000, 1560, 1, 1);
+  const vMat = new THREE.MeshBasicMaterial({ map: makeVignetteTexture(), transparent:true, depthWrite:false });
+  const vignette = new THREE.Mesh(vGeo, vMat);
+  vignette.rotation.x = -Math.PI/2;
+  vignette.position.set(MAP_CENTER.x, 10, MAP_CENTER.z);
+  vignette.renderOrder = 10;
+  scene.add(vignette);
+}
+
+/* ---------------------------------------------------------------
+   Geometry helpers — everything is authored directly in world
+   X/Z (x = east, z = south), so no shape/rotate tricks are needed.
+--------------------------------------------------------------- */
+function centroid(pts){ let x=0,y=0; pts.forEach(p=>{x+=p[0];y+=p[1];}); return [x/pts.length, y/pts.length]; }
+function scalePts(pts, f, c){ return pts.map(p=>[c[0]+(p[0]-c[0])*f, c[1]+(p[1]-c[1])*f]); }
+
+// smooth an organic district outline into a dense point ring (quadratic through midpoints)
+function smoothRing(pts, segsPerEdge=10){
+  const n = pts.length;
+  const mid = (a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  const out = [];
+  for(let i=0;i<n;i++){
+    const prev = pts[(i-1+n)%n], cur = pts[i], next = pts[(i+1)%n];
+    const p0 = mid(prev,cur), p2 = mid(cur,next);
+    for(let s=0;s<segsPerEdge;s++){
+      const t = s/segsPerEdge;
+      const x = (1-t)*(1-t)*p0[0] + 2*(1-t)*t*cur[0] + t*t*p2[0];
+      const y = (1-t)*(1-t)*p0[1] + 2*(1-t)*t*cur[1] + t*t*p2[1];
+      out.push([x,y]);
+    }
+  }
+  return out;
+}
+
+// triangulate one or more flat polygons (2D point rings, already closed or not) into one mesh
+function buildFlatPolyMesh(polyList, height){
+  const tris = [];
+  const vecLists = [];
+  for(const ring of polyList){
+    let pts = ring;
+    if(pts.length>2 && pts[0][0]===pts[pts.length-1][0] && pts[0][1]===pts[pts.length-1][1]) pts = pts.slice(0,-1);
+    if(pts.length<3) continue;
+    const vec2 = pts.map(p=>new THREE.Vector2(p[0], p[1]));
+    let t;
+    try{ t = THREE.ShapeUtils.triangulateShape(vec2, []); } catch(e){ continue; }
+    vecLists.push({vec2, t});
+  }
+  let total=0; vecLists.forEach(v=>total+=v.t.length);
+  const positions = new Float32Array(total*9);
+  let vi=0;
+  vecLists.forEach(({vec2,t})=>{
+    t.forEach(([a,b,c])=>{
+      const pa=vec2[a], pb=vec2[b], pc=vec2[c];
+      positions[vi++]=pa.x; positions[vi++]=height; positions[vi++]=pa.y;
+      positions[vi++]=pb.x; positions[vi++]=height; positions[vi++]=pb.y;
+      positions[vi++]=pc.x; positions[vi++]=height; positions[vi++]=pc.y;
+    });
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions,3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// build a flat ribbon (merged quads) along one or many polylines
+function buildRibbonGeometry(lines, halfWidth, opts={}){
+  const dash = !!opts.dash;
+  let segCount = 0;
+  for(const line of lines) segCount += Math.max(0, line.length-1);
+  const positions = new Float32Array(segCount*4*3);
+  const indices = new Uint32Array(segCount*6);
+  let vi=0, ii=0, vBase=0, used=0;
+  for(const line of lines){
+    for(let i=0;i<line.length-1;i++){
+      if(dash && (i % 3 === 2)) continue;
+      const a=line[i], b=line[i+1];
+      const dx=b[0]-a[0], dz=b[1]-a[1];
+      const len = Math.hypot(dx,dz) || 1;
+      const nx = -dz/len*halfWidth, nz = dx/len*halfWidth;
+      positions[vi++]=a[0]+nx; positions[vi++]=0; positions[vi++]=a[1]+nz;
+      positions[vi++]=a[0]-nx; positions[vi++]=0; positions[vi++]=a[1]-nz;
+      positions[vi++]=b[0]+nx; positions[vi++]=0; positions[vi++]=b[1]+nz;
+      positions[vi++]=b[0]-nx; positions[vi++]=0; positions[vi++]=b[1]-nz;
+      indices[ii++]=vBase+0; indices[ii++]=vBase+1; indices[ii++]=vBase+2;
+      indices[ii++]=vBase+1; indices[ii++]=vBase+3; indices[ii++]=vBase+2;
+      vBase+=4; used++;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions.subarray(0,used*12),3));
+  geo.setIndex(new THREE.BufferAttribute(indices.subarray(0,used*6),1));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/* ---------------------------------------------------------------
+   District zones (translucent wash + thin ink border)
+--------------------------------------------------------------- */
+const regionMeshes = [];
+const raycastTargets = [];
+
+// feathered edge: a few larger, softer copies of the same blob stacked under
+// the core fill so the color fades out gradually instead of cutting off
+const FEATHER = [
+  { scale:1.62, opacity:0.035, y:0.44 },
+  { scale:1.42, opacity:0.07,  y:0.49 },
+  { scale:1.24, opacity:0.13,  y:0.54 },
+  { scale:1.10, opacity:0.22,  y:0.59 },
+];
+
+REGIONS.forEach(region=>{
+  const ring = smoothRing(region.pts, 10);
+  const c = centroid(ring);
+  const base = new THREE.Color(region.color);
+  const hover = new THREE.Color(region.hoverColor);
+
+  FEATHER.forEach(f=>{
+    const fRing = scalePts(ring, f.scale, c);
+    const fGeo = buildFlatPolyMesh([fRing], 0);
+    const fMat = new THREE.MeshBasicMaterial({ color:region.color, transparent:true, opacity:f.opacity, side:THREE.DoubleSide, depthWrite:false });
+    const fMesh = new THREE.Mesh(fGeo, fMat);
+    fMesh.position.y = f.y;
+    fMesh.userData = { key:region.key, base, hover, hoverAmount:0, hoverTarget:0, baseOpacity:f.opacity, hoverOpacity:Math.min(0.85, f.opacity*1.7) };
+    scene.add(fMesh);
+    regionMeshes.push(fMesh);
+  });
+
+  const geo = buildFlatPolyMesh([ring], 0);
+  const mat = new THREE.MeshBasicMaterial({ color:region.color, transparent:true, opacity:0.3, side:THREE.DoubleSide, depthWrite:false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = 0.64;
+  mesh.userData = { key:region.key, base, hover, hoverAmount:0, hoverTarget:0, baseOpacity:0.3, hoverOpacity:0.6 };
+  scene.add(mesh);
+  regionMeshes.push(mesh);
+  raycastTargets.push(mesh);
+
+  const positions = [];
+  ring.forEach(p=>positions.push(p[0], 0.9, p[1]));
+  positions.push(ring[0][0], 0.9, ring[0][1]);
+  const bGeo = new THREE.BufferGeometry();
+  bGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
+  const border = new THREE.Line(bGeo, new THREE.LineBasicMaterial({ color:0x2B2018, transparent:true, opacity:0.2 }));
+  scene.add(border);
+});
+
+/* ---------------------------------------------------------------
+   Marked-story pins — small flat disc markers at each site's real,
+   projected position, with a soft halo underneath and a white ring
+   like the project's usual pin style. Clickable, same as districts.
+--------------------------------------------------------------- */
+const siteMeshes = [];
+const siteRaycastTargets = [];
+const SITE_Y = 6.4;
+
+SITES.forEach(site=>{
+  const [x, z] = site.world;
+  const base = new THREE.Color(site.color);
+  const hover = base.clone().lerp(new THREE.Color(0xffffff), 0.25);
+
+  const haloGeo = new THREE.CircleGeometry(15, 28);
+  const haloMat = new THREE.MeshBasicMaterial({ color:site.color, transparent:true, opacity:0.18, side:THREE.DoubleSide, depthWrite:false });
+  const halo = new THREE.Mesh(haloGeo, haloMat);
+  halo.rotation.x = -Math.PI/2;
+  halo.position.set(x, SITE_Y - 0.3, z);
+  halo.userData = { kind:'site', key:site.id, base:new THREE.Color(site.color), hover:new THREE.Color(site.color), hoverAmount:0, hoverTarget:0, baseOpacity:0.18, hoverOpacity:0.4 };
+  scene.add(halo);
+  siteMeshes.push(halo);
+
+  const ringGeo = new THREE.RingGeometry(4.6, 6.6, 24);
+  const ringMat = new THREE.MeshBasicMaterial({ color:site.color, side:THREE.DoubleSide });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = -Math.PI/2;
+  ring.position.set(x, SITE_Y, z);
+  scene.add(ring);
+
+  const dotGeo = new THREE.CircleGeometry(4.6, 24);
+  const dotMat = new THREE.MeshBasicMaterial({ color:0xFBF3DE });
+  const dot = new THREE.Mesh(dotGeo, dotMat);
+  dot.rotation.x = -Math.PI/2;
+  dot.position.set(x, SITE_Y + 0.05, z);
+  dot.userData = { kind:'site', key:site.id, base, hover, hoverAmount:0, hoverTarget:0, isDot:true };
+  scene.add(dot);
+  siteMeshes.push(dot);
+  siteRaycastTargets.push(dot);
+
+  site.meshes = { halo, ring, dot };
+});
+
+/* ---------------------------------------------------------------
+   Real street / river / rail data, fetched and built once ready
+--------------------------------------------------------------- */
+const loadingEl = document.getElementById('loading');
+const roadLabelEntries = [];
+
+const TIER_STYLE = {
+  t1: { color:0xCB7F45, opacity:0.82, half:11,  y:3.6 },
+  t2: { color:0xE3B368, opacity:0.78, half:7.5, y:3.2 },
+  t3: { color:0xAD9575, opacity:0.5,  half:5,   y:2.8 },
+  t4: { color:0xBDA98D, opacity:0.36, half:3.2, y:2.5 },
+  t5: { color:0xC9BA9F, opacity:0.22, half:1.6, y:2.2 },
+};
+
+// Nudge any site marker that lands inside the river/canal ribbon (or a water
+// polygon) back onto dry land — the affine projection is accurate to a few
+// meters, which is well within the width of the river itself, so a couple of
+// riverside sites (Talad Noi, Songwat) can otherwise land in the water.
+function nearestOnPolylines(x, z, lines){
+  let best = null;
+  lines.forEach(line=>{
+    for(let i=0;i<line.length-1;i++){
+      const a = line[i], b = line[i+1];
+      const abx = b[0]-a[0], abz = b[1]-a[1];
+      const abLenSq = abx*abx + abz*abz || 1;
+      let t = ((x-a[0])*abx + (z-a[1])*abz) / abLenSq;
+      t = Math.max(0, Math.min(1, t));
+      const px = a[0] + abx*t, pz = a[1] + abz*t;
+      const dx = x-px, dz = z-pz;
+      const dist = Math.hypot(dx, dz);
+      if(!best || dist < best.dist) best = { dist, px, pz, dx, dz };
+    }
+  });
+  return best;
+}
+
+function pointInPolygon(x, z, pts){
+  let inside = false;
+  for(let i=0, j=pts.length-1; i<pts.length; j=i++){
+    const xi=pts[i][0], zi=pts[i][1], xj=pts[j][0], zj=pts[j][1];
+    const hit = ((zi>z)!==(zj>z)) && (x < (xj-xi)*(z-zi)/((zj-zi)||1e-9) + xi);
+    if(hit) inside = !inside;
+  }
+  return inside;
+}
+
+function keepSitesOnDryLand(data){
+  const riverLines = data.river || [];
+  const canalLines = (data.canals||[]).map(c=>c.pts);
+  const waterPolys = (data.water||[]).filter(w=>w.area>12).map(w=>w.pts);
+  // clearance = ribbon half-width + the marker's own halo radius (15) + a
+  // small buffer, so the halo itself doesn't visually lap back into the water
+  const RIVER_CLEAR = 15 + 15 + 4;
+  const CANAL_CLEAR = 4.5 + 15 + 3;
+
+  SITES.forEach(site=>{
+    let [x, z] = site.world;
+    let moved = false;
+
+    const nearRiver = riverLines.length ? nearestOnPolylines(x, z, riverLines) : null;
+    if(nearRiver && nearRiver.dist < RIVER_CLEAR){
+      const len = nearRiver.dist || 1;
+      const nx = nearRiver.dist > 0.01 ? nearRiver.dx/len : 1, nz = nearRiver.dist > 0.01 ? nearRiver.dz/len : 0;
+      x = nearRiver.px + nx*RIVER_CLEAR;
+      z = nearRiver.pz + nz*RIVER_CLEAR;
+      moved = true;
+    }
+
+    const nearCanal = canalLines.length ? nearestOnPolylines(x, z, canalLines) : null;
+    if(nearCanal && nearCanal.dist < CANAL_CLEAR){
+      const len = nearCanal.dist || 1;
+      const nx = nearCanal.dist > 0.01 ? nearCanal.dx/len : 1, nz = nearCanal.dist > 0.01 ? nearCanal.dz/len : 0;
+      x = nearCanal.px + nx*CANAL_CLEAR;
+      z = nearCanal.pz + nz*CANAL_CLEAR;
+      moved = true;
+    }
+
+    for(const poly of waterPolys){
+      if(pointInPolygon(x, z, poly)){
+        const near = nearestOnPolylines(x, z, [poly.concat([poly[0]])]);
+        if(near){
+          const len = near.dist || 1;
+          const nx = near.dist > 0.01 ? -near.dx/len : 1, nz = near.dist > 0.01 ? -near.dz/len : 0;
+          x = near.px + nx*19;
+          z = near.pz + nz*19;
+          moved = true;
+        }
+        break;
+      }
+    }
+
+    if(!moved) return;
+    site.world = [x, z];
+    site.meshes.halo.position.set(x, SITE_Y - 0.3, z);
+    site.meshes.ring.position.set(x, SITE_Y, z);
+    site.meshes.dot.position.set(x, SITE_Y + 0.05, z);
+    if(site.labelWorld){ site.labelWorld.x = x; site.labelWorld.z = z; }
+    if(selectedKind==='site' && selectedKey===site.id){ targetCenter = { x, z }; }
+  });
+}
+
+fetch(DATA_URL).then(r=>{ if(!r.ok) throw new Error('http '+r.status); return r.json(); }).then(data=>{
+  keepSitesOnDryLand(data);
+
+  // water
+  const waterPolys = (data.water||[]).filter(w=>w.area>12).map(w=>w.pts);
+  if(waterPolys.length){
+    const wg = buildFlatPolyMesh(waterPolys, 1.2);
+    const wm = new THREE.MeshBasicMaterial({ color:0x9CC7DA, transparent:true, opacity:0.85, side:THREE.DoubleSide, depthWrite:false });
+    scene.add(new THREE.Mesh(wg, wm));
+  }
+
+  // canals
+  const canalLines = (data.canals||[]).map(c=>c.pts);
+  if(canalLines.length){
+    const cg = buildRibbonGeometry(canalLines, 4.5);
+    const cm = new THREE.MeshBasicMaterial({ color:0x8FBBD1, transparent:true, opacity:0.75, side:THREE.DoubleSide });
+    const cmesh = new THREE.Mesh(cg, cm); cmesh.position.y = 1.5;
+    scene.add(cmesh);
+  }
+
+  // river
+  if((data.river||[]).length){
+    const rg = buildRibbonGeometry(data.river, 15);
+    const rm = new THREE.MeshBasicMaterial({ color:0x5D93B8, transparent:true, opacity:0.82, side:THREE.DoubleSide });
+    const rmesh = new THREE.Mesh(rg, rm); rmesh.position.y = 1.8;
+    scene.add(rmesh);
+  }
+
+  // roads, minor tier first so major roads draw on top
+  ['t5','t4','t3','t2','t1'].forEach(tier=>{
+    const lines = (data.roads && data.roads[tier]) || [];
+    if(!lines.length) return;
+    const style = TIER_STYLE[tier];
+    const geo = buildRibbonGeometry(lines, style.half);
+    const mat = new THREE.MeshBasicMaterial({ color:style.color, transparent:true, opacity:style.opacity, side:THREE.DoubleSide });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = style.y;
+    scene.add(mesh);
+  });
+
+  // rail
+  const railLines = [...((data.rail&&data.rail.rail)||[]), ...((data.rail&&data.rail.subway)||[])];
+  if(railLines.length){
+    const rg = buildRibbonGeometry(railLines, 3, { dash:true });
+    const rm = new THREE.MeshBasicMaterial({ color:0x4C9686, transparent:true, opacity:0.7, side:THREE.DoubleSide });
+    const rmesh = new THREE.Mesh(rg, rm); rmesh.position.y = 4.0;
+    scene.add(rmesh);
+  }
+
+  // curated named-road labels — biggest expressways/primary roads first
+  const labels = (data.roadLabels||[]).slice().sort((a,b)=>b.len-a.len);
+  const majorTiers = labels.filter(l=>l.tier==='t1'||l.tier==='t2').slice(0,18);
+  const midTiers = labels.filter(l=>l.tier==='t3').slice(0,6);
+  [...majorTiers, ...midTiers].forEach(l=>{
+    const el = addLabel(l.name, 'lbl-road' + (l.tier==='t1'||l.tier==='t2' ? ' major' : ''), worldPt(l.pt[0], l.pt[1], 16));
+    roadLabelEntries.push(el);
+  });
+
+  loadingEl.classList.add('hidden');
+}).catch(err=>{
+  console.error('map data failed to load', err);
+  loadingEl.textContent = "Couldn't load street data — showing districts only.";
+  setTimeout(()=>loadingEl.classList.add('hidden'), 2200);
+});
+
+/* ---------------------------------------------------------------
+   HTML label overlay
+--------------------------------------------------------------- */
+const labelsRoot = document.getElementById('labels');
+function worldPt(x,z,h=0){ return new THREE.Vector3(x,h,z); }
+
+const labelEntries = [];
+function addLabel(html, cls, world, opts={}){
+  const el = document.createElement('div');
+  el.className = 'lbl ' + cls;
+  el.innerHTML = html;
+  if(opts.key) el.dataset.key = opts.key;
+  if(opts.kind) el.dataset.kind = opts.kind;
+  if(opts.onClick){
+    // Labels sit on top of the canvas as separate DOM elements, so a plain
+    // 'click' listener here would swallow pointerdown before it ever reaches
+    // the canvas's own drag-to-orbit handler -- making the map feel dead
+    // wherever a label happens to be sitting. Instead we mirror the canvas's
+    // own drag-vs-click logic: a press-and-drag that starts on a label still
+    // orbits the map, and only a press-without-movement fires the click.
+    el.style.pointerEvents = 'auto';
+    el.style.cursor = 'pointer';
+    let labelDragging = false;
+    el.addEventListener('pointerdown', (e)=>{
+      labelDragging = true; dragging = true; moved = false;
+      lastX = downX = e.clientX; lastY = downY = e.clientY;
+      canvas.classList.add('dragging');
+      try{ el.setPointerCapture(e.pointerId); }catch(err){}
+    });
+    el.addEventListener('pointermove', (e)=>{
+      if(!labelDragging) return;
+      const dx = e.clientX - lastX, dy = e.clientY - lastY;
+      lastX = e.clientX; lastY = e.clientY;
+      if(Math.abs(e.clientX-downX) + Math.abs(e.clientY-downY) > 4){
+        moved = true; hideHint();
+      }
+      applyPanDelta(dx, dy);
+    });
+    const endLabelDrag = (e)=>{
+      if(!labelDragging) return;
+      labelDragging = false; dragging = false;
+      canvas.classList.remove('dragging');
+      if(!moved) opts.onClick();
+    };
+    el.addEventListener('pointerup', endLabelDrag);
+    el.addEventListener('pointercancel', endLabelDrag);
+  }
+  labelsRoot.appendChild(el);
+  labelEntries.push({ el, world, key:opts.key, kind:opts.kind, anchor:opts.anchor||'center' });
+  return el;
+}
+
+REGIONS.forEach(r=>{
+  addLabel(r.name, 'lbl-district', worldPt(r.label[0], r.label[1], 24), { key:r.key, kind:'district' });
+});
+LANDMARKS.forEach(l=>{
+  addLabel('<span class="dot"></span>'+l.name, 'lbl-landmark', worldPt(l.pos[0]-70, l.pos[1]+2, 20));
+});
+STREETS.forEach(s=>{
+  addLabel(s.name, 'lbl-street', worldPt(s.pos[0], s.pos[1]-14, 20));
+});
+addLabel('Chao Phraya River', 'lbl-river', worldPt(-450, 260, 12));
+CALLOUTS.forEach(c=>{
+  addLabel(c.html, 'lbl-callout', worldPt(c.pos[0], c.pos[1], 20));
+});
+
+SITES.forEach(site=>{
+  // Anchor the label at the marker's exact world position (not offset in
+  // world space) -- under a tilted camera, a world-space offset projects
+  // to a diagonal screen shift that drifts differently at every zoom/angle.
+  // Instead the label is anchored left (see the 'anchor' handling in the
+  // per-frame projection loop below), which adds a small, constant
+  // SCREEN-space gap -- so the text always trails the marker by the same
+  // distance, regardless of tilt or zoom. No duplicate ring icon here; the
+  // 3D ring+dot mesh is the only marker, so there's nothing to drift apart.
+  const labelWorld = worldPt(site.world[0], site.world[1], 26);
+  const el = addLabel(
+    site.name,
+    'lbl-site',
+    labelWorld,
+    { key:site.id, kind:'site', onClick:()=>{ selectSite(site.id); }, anchor:'left' }
+  );
+  site.labelWorld = labelWorld;
+});
+
+/* ---------------------------------------------------------------
+   Camera rig: spherical orbit around MAP_CENTER, orthographic zoom
+--------------------------------------------------------------- */
+const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const LERP = reduceMotion ? 1 : 0.12;
+
+const DEFAULT_AZ = 0, DEFAULT_EL = THREE.MathUtils.degToRad(89), DEFAULT_ZOOM = 1;
+const MIN_EL = THREE.MathUtils.degToRad(34), MAX_EL = THREE.MathUtils.degToRad(89.4);
+const MIN_AZ = THREE.MathUtils.degToRad(-55), MAX_AZ = THREE.MathUtils.degToRad(55);
+const MIN_ZOOM = 0.22, MAX_ZOOM = 1.9;
+const BASE_HALF = 700;
+const CAM_R = 1750;
+
+let az = DEFAULT_AZ, el = DEFAULT_EL, zoom = DEFAULT_ZOOM;
+let targetAz = DEFAULT_AZ, targetEl = DEFAULT_EL, targetZoom = DEFAULT_ZOOM;
+let center = { x:MAP_CENTER.x, z:MAP_CENTER.z };
+let targetCenter = { x:MAP_CENTER.x, z:MAP_CENTER.z };
+
+function updateCameraFrustum(){
+  const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+  const aspect = w / h;
+  const targetHalf = BASE_HALF * zoom;
+  let halfW, halfH;
+  if(aspect >= 1){ halfH = targetHalf; halfW = targetHalf * aspect; }
+  else { halfW = targetHalf; halfH = targetHalf / aspect; }
+  camera.left = -halfW; camera.right = halfW;
+  camera.top = halfH; camera.bottom = -halfH;
+  camera.near = 1; camera.far = 4000;
+  camera.updateProjectionMatrix();
+}
+
+function updateCameraPosition(){
+  const cx = center.x + CAM_R*Math.cos(el)*Math.sin(az);
+  const cy = CAM_R*Math.sin(el);
+  const cz = center.z + CAM_R*Math.cos(el)*Math.cos(az);
+  camera.position.set(cx,cy,cz);
+  camera.up.set(0,1,0);
+  camera.lookAt(center.x, 0, center.z);
+}
+
+// Roughly how far the loaded street data actually extends -- generous
+// margin beyond it so a drag never strands someone on the bare board
+// plate with no way to tell which direction has content.
+const PAN_MIN_X = -950, PAN_MAX_X = 1150, PAN_MIN_Z = -750, PAN_MAX_Z = 750;
+
+// Click-drag pans the map (translates the look-at center) instead of
+// orbiting the camera around a fixed pivot. A pure rotate-in-place made
+// content near the pivot look almost frozen while the site pins -- sitting
+// well away from center -- swept through visible arcs, so the map read as
+// "stuck" while the pins seemed to drift on their own. Panning moves
+// everything together by the same amount, which is also just the
+// interaction people expect from a map.
+//
+// The math: `right` and `forwardGround` are an orthonormal ground-plane
+// basis built from the camera's azimuth. A horizontal drag translates the
+// center purely along `right`; because center and camera share the same
+// (fixed) spherical offset, translating center is a rigid translation of
+// the whole rig, which keeps the derivation exact. A vertical drag
+// translates along `forwardGround`, scaled by 1/sin(el) to cancel the
+// foreshortening a tilted view otherwise introduces (near the default
+// near-top-down elevation this factor is ~1, so panning feels direct).
+function applyPanDelta(dx, dy){
+  const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
+  const worldPerPixelX = (camera.right - camera.left) / w;
+  const worldPerPixelY = (camera.top - camera.bottom) / h;
+  const right = { x: Math.cos(az), z: -Math.sin(az) };
+  const forwardGround = { x: -Math.sin(az), z: -Math.cos(az) };
+  const a = -dx * worldPerPixelX;
+  const b = dy * worldPerPixelY / Math.max(Math.sin(el), 0.05);
+  targetCenter = {
+    x: THREE.MathUtils.clamp(targetCenter.x + a*right.x + b*forwardGround.x, PAN_MIN_X, PAN_MAX_X),
+    z: THREE.MathUtils.clamp(targetCenter.z + a*right.z + b*forwardGround.z, PAN_MIN_Z, PAN_MAX_Z)
+  };
+}
+
+/* ---------------------------------------------------------------
+   Pointer interaction: drag to orbit, wheel to zoom, click to select
+--------------------------------------------------------------- */
+let dragging = false, moved = false, lastX = 0, lastY = 0, downX = 0, downY = 0;
+let hoveredKey = null, hoveredKind = null, selectedKey = null, selectedKind = null;
+let hintVisible = true;
+
+const hintEl = document.getElementById('hint');
+function hideHint(){
+  if(!hintVisible) return;
+  hintVisible = false;
+  hintEl.classList.add('hidden');
+}
+
+canvas.addEventListener('pointerdown', (e)=>{
+  dragging = true; moved = false;
+  lastX = downX = e.clientX; lastY = downY = e.clientY;
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add('dragging');
+});
+
+canvas.addEventListener('pointermove', (e)=>{
+  if(dragging){
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    if(Math.abs(e.clientX-downX) + Math.abs(e.clientY-downY) > 4){
+      moved = true; hideHint();
+    }
+    applyPanDelta(dx, dy);
+  } else {
+    updateHover(e.clientX, e.clientY);
+  }
+});
+
+window.addEventListener('pointerup', (e)=>{
+  if(!dragging) return;
+  dragging = false;
+  canvas.classList.remove('dragging');
+  if(!moved){
+    handleClick(e.clientX, e.clientY);
+  }
+});
+
+canvas.addEventListener('wheel', (e)=>{
+  e.preventDefault();
+  hideHint();
+  targetZoom = THREE.MathUtils.clamp(targetZoom * (1 + e.deltaY*0.0014), MIN_ZOOM, MAX_ZOOM);
+}, { passive:false });
+
+const mouseNDC = new THREE.Vector2();
+const raycaster = new THREE.Raycaster();
+
+function ndcFromClient(clientX, clientY){
+  const rect = canvas.getBoundingClientRect();
+  mouseNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  mouseNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+function raycastAll(clientX, clientY){
+  ndcFromClient(clientX, clientY);
+  raycaster.setFromCamera(mouseNDC, camera);
+  const siteHits = raycaster.intersectObjects(siteRaycastTargets, false);
+  if(siteHits.length) return { kind:'site', key:siteHits[0].object.userData.key };
+  const distHits = raycaster.intersectObjects(raycastTargets, false);
+  if(distHits.length) return { kind:'district', key:distHits[0].object.userData.key };
+  return null;
+}
+
+function updateHover(clientX, clientY){
+  const hit = raycastAll(clientX, clientY);
+  const key = hit ? hit.key : null;
+  const kind = hit ? hit.kind : null;
+  if(key !== hoveredKey || kind !== hoveredKind){
+    hoveredKey = key; hoveredKind = kind;
+    canvas.classList.toggle('hoverable', !!key);
+    syncHoverTargets();
+    syncLabelActive();
+  }
+}
+
+function handleClick(clientX, clientY){
+  const hit = raycastAll(clientX, clientY);
+  if(hit && hit.kind === 'site'){
+    selectSite(hit.key);
+  } else if(hit && hit.kind === 'district'){
+    selectDistrict(hit.key);
+  } else {
+    deselect();
+  }
+}
+
+function syncHoverTargets(){
+  regionMeshes.forEach(m=>{
+    const active = (m.userData.key === hoveredKey && hoveredKind==='district') || (m.userData.key === selectedKey && selectedKind==='district');
+    m.userData.hoverTarget = active ? 1 : 0;
+  });
+  siteMeshes.forEach(m=>{
+    const active = (m.userData.key === hoveredKey && hoveredKind==='site') || (m.userData.key === selectedKey && selectedKind==='site');
+    m.userData.hoverTarget = active ? 1 : 0;
+  });
+}
+function syncLabelActive(){
+  labelEntries.forEach(entry=>{
+    if(!entry.key) return;
+    // Site names reveal on hover ONLY, never merely from being "selected" --
+    // a site is auto-selected on load (the last one viewed, remembered in
+    // localStorage, or the flagship story by default) and stays selected
+    // while its info panel is open, so tying the label to selection meant
+    // one name was always stuck on screen even with nothing being hovered.
+    // The 3D marker itself still shows which site is selected (it gets the
+    // same hover/select highlight via syncHoverTargets()), so selection
+    // feedback isn't lost -- just the permanently-floating text label is.
+    // District names are unaffected: those stay visible always by design.
+    const active = entry.kind === 'site'
+      ? (entry.key === hoveredKey && hoveredKind === 'site')
+      : (entry.key === hoveredKey && entry.kind===hoveredKind) || (entry.key === selectedKey && entry.kind===selectedKind);
+    entry.el.classList.toggle('active', active);
+  });
+}
+
+/* ---------------------------------------------------------------
+   Info panel
+--------------------------------------------------------------- */
+const panel = document.getElementById('panel');
+const panelTitle = document.getElementById('panelTitle');
+const panelTag = document.getElementById('panelTag');
+const panelPlace = document.getElementById('panelPlace');
+const panelHook = document.getElementById('panelHook');
+const panelStory = document.getElementById('panelStory');
+const panelDesc = document.getElementById('panelDesc');
+const panelSwatch = document.getElementById('panelSwatch');
+const panelCoords = document.getElementById('panelCoords');
+const panelCoordsText = document.getElementById('panelCoordsText');
+const panelIndexText = document.getElementById('panelIndexText');
+const regionByKey = Object.fromEntries(REGIONS.map(r=>[r.key,r]));
+const siteByKey = Object.fromEntries(SITES.map(s=>[s.id,s]));
+
+function selectDistrict(key){
+  selectedKey = key; selectedKind = 'district';
+  const r = regionByKey[key];
+  panelSwatch.style.background = '#' + r.color.toString(16).padStart(6,'0');
+  panelTag.textContent = r.tag;
+  panelPlace.hidden = true;
+  panelTitle.textContent = r.name;
+  panelHook.hidden = true;
+  panelStory.hidden = true;
+  panelDesc.hidden = false;
+  panelDesc.textContent = r.desc;
+  panelCoords.hidden = true;
+  panel.classList.add('open');
+  targetZoom = THREE.MathUtils.clamp(targetZoom, MIN_ZOOM, 0.7);
+  targetCenter = { x: MAP_CENTER.x*0.5 + r.label[0]*0.5, z: MAP_CENTER.z*0.5 + r.label[1]*0.5 };
+  hideHint();
+  syncHoverTargets();
+  syncLabelActive();
+}
+
+function selectSite(id){
+  selectedKey = id; selectedKind = 'site';
+  const s = siteByKey[id];
+  const idx = SITES.indexOf(s);
+  panelSwatch.style.background = s.color;
+  panelTag.textContent = s.era;
+  panelPlace.hidden = false;
+  panelPlace.textContent = s.neighborhood;
+  panelTitle.textContent = s.name;
+  panelHook.hidden = false;
+  panelHook.textContent = s.hook;
+  panelHook.style.color = s.color;
+  panelTag.style.color = s.color;
+  panelTag.style.borderColor = s.color;
+  panelStory.hidden = false;
+  panelStory.innerHTML = s.story.map(p=>'<p>'+p+'</p>').join('');
+  panelDesc.hidden = true;
+  panelCoords.hidden = false;
+  panelCoordsText.textContent = s.lat.toFixed(5) + ', ' + s.lon.toFixed(5);
+  panelIndexText.textContent = 'No. ' + String(idx+1).padStart(2,'0') + ' of ' + SITES.length;
+  panel.classList.add('open');
+  targetZoom = THREE.MathUtils.clamp(targetZoom, MIN_ZOOM, 0.32);
+  targetCenter = { x: s.world[0], z: s.world[1] };
+  hideHint();
+  syncHoverTargets();
+  syncLabelActive();
+  try{ localStorage.setItem('bkk-unmarked-last', id); }catch(e){}
+}
+
+function deselect(){
+  selectedKey = null; selectedKind = null;
+  panel.classList.remove('open');
+  targetCenter = { x:MAP_CENTER.x, z:MAP_CENTER.z };
+  targetZoom = DEFAULT_ZOOM;
+  syncHoverTargets();
+  syncLabelActive();
+}
+document.getElementById('closePanel').addEventListener('click', deselect);
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  deselect();
+  targetAz = DEFAULT_AZ; targetEl = DEFAULT_EL; targetZoom = DEFAULT_ZOOM;
+});
+
+document.getElementById('wanderBtn').addEventListener('click', ()=>{
+  let choice;
+  if(SITES.length === 1){ choice = SITES[0]; }
+  else{ do{ choice = SITES[Math.floor(Math.random()*SITES.length)]; } while(choice.id === selectedKey); }
+  selectSite(choice.id);
+});
+
+const aboutModal = document.getElementById('aboutModal');
+function openAbout(){
+  aboutModal.classList.add('open');
+  aboutModal.setAttribute('aria-hidden','false');
+}
+function closeAbout(){
+  aboutModal.classList.remove('open');
+  aboutModal.setAttribute('aria-hidden','true');
+}
+document.getElementById('aboutBtn').addEventListener('click', openAbout);
+document.getElementById('aboutClose').addEventListener('click', closeAbout);
+// Click on the dimmed backdrop (not the box itself) also dismisses it.
+aboutModal.addEventListener('click', (e)=>{ if(e.target === aboutModal) closeAbout(); });
+window.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeAbout(); });
+
+/* ---------------------------------------------------------------
+   Resize
+--------------------------------------------------------------- */
+function resize(){
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  updateCameraFrustum();
+}
+window.addEventListener('resize', resize);
+
+/* ---------------------------------------------------------------
+   Animation loop
+--------------------------------------------------------------- */
+const compassSvg = document.querySelector('#compass svg');
+
+function animate(){
+  requestAnimationFrame(animate);
+
+  az = THREE.MathUtils.lerp(az, targetAz, LERP);
+  el = THREE.MathUtils.lerp(el, targetEl, LERP);
+  zoom = THREE.MathUtils.lerp(zoom, targetZoom, LERP);
+  center.x = THREE.MathUtils.lerp(center.x, targetCenter.x, LERP);
+  center.z = THREE.MathUtils.lerp(center.z, targetCenter.z, LERP);
+
+  updateCameraFrustum();
+  updateCameraPosition();
+
+  regionMeshes.forEach(m=>{
+    m.userData.hoverAmount = THREE.MathUtils.lerp(m.userData.hoverAmount, m.userData.hoverTarget, reduceMotion?1:0.18);
+    m.material.opacity = THREE.MathUtils.lerp(m.userData.baseOpacity, m.userData.hoverOpacity, m.userData.hoverAmount);
+    m.material.color.copy(m.userData.base).lerp(m.userData.hover, m.userData.hoverAmount);
+  });
+
+  siteMeshes.forEach(m=>{
+    m.userData.hoverAmount = THREE.MathUtils.lerp(m.userData.hoverAmount, m.userData.hoverTarget, reduceMotion?1:0.18);
+    const s = 1 + m.userData.hoverAmount*0.3;
+    m.scale.set(s,s,s);
+    if(m.userData.isDot){
+      m.material.color.copy(m.userData.base).lerp(m.userData.hover, m.userData.hoverAmount);
+    } else if(m.userData.baseOpacity !== undefined){
+      m.material.opacity = THREE.MathUtils.lerp(m.userData.baseOpacity, m.userData.hoverOpacity, m.userData.hoverAmount);
+    }
+  });
+
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const v = new THREE.Vector3();
+  labelEntries.forEach(entry=>{
+    v.copy(entry.world).project(camera);
+    const x = (v.x*0.5+0.5)*w;
+    const y = (-v.y*0.5+0.5)*h;
+    // 'left'-anchored labels (site markers) sit with their ring bullet
+    // right on the projected point and their text trailing after it by a
+    // fixed number of SCREEN pixels -- kept constant regardless of tilt or
+    // zoom, unlike a world-space offset, so the ring never drifts away
+    // from the actual 3D marker underneath it.
+    const originTransform = entry.anchor === 'left' ? 'translate(16px,-50%)' : 'translate(-50%,-50%)';
+    entry.el.style.transform = `${originTransform} translate(${x}px,${y}px)`;
+  });
+
+  compassSvg.style.transform = `rotate(${-az}rad)`;
+
+  renderer.render(scene, camera);
+}
+
+resize();
+
+// open the flagship story once on load, same as the previous draft
+(function initialSelect(){
+  let startId = 'cia-safehouse';
+  try{
+    const saved = localStorage.getItem('bkk-unmarked-last');
+    if(saved && SITES.some(s=>s.id===saved)) startId = saved;
+  }catch(e){}
+  selectSite(startId);
+})();
+
+animate();
+</script>
